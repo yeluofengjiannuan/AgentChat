@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import chromadb
 from loguru import logger
 from agentchat.services.rag.embedding import get_embedding
 from agentchat.schemas.search import SearchModel
+from agentchat.settings import app_settings
 from typing import Dict, Optional, List
 
 """
@@ -19,9 +22,15 @@ class ChromaClient:
     def _connect(self):
         """建立 Chroma 连接"""
         try:
-            # 使用持久化客户端，避免内存丢失
-            self.client = chromadb.PersistentClient(path="./vector_db")
-            logger.info("Successfully connected to Chroma")
+            # 使用持久化客户端，避免内存丢失。
+            # 相对路径以 backend 根目录为基准，避免工作目录不同时连到别的数据库。
+            configured = app_settings.rag.vector_db.get("path") or "vector_db"
+            path = Path(configured)
+            if not path.is_absolute():
+                path = Path(__file__).resolve().parents[4] / path
+            path.mkdir(parents=True, exist_ok=True)
+            self.client = chromadb.PersistentClient(path=str(path))
+            logger.info(f"Successfully connected to Chroma at {path}")
         except Exception as e:
             logger.error(f"Failed to connect to Chroma: {e}")
             raise
