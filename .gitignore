@@ -25,3 +25,12 @@ src/backend/data/uploads/
 src/backend/logs/
 src/frontend/public/ui-detail-review/
 docs/design-preview/
+
+# 构建产物与增量缓存（每次构建都会变，不应进入版本库）
+*.tsbuildinfo
+src/frontend/dist/
+src/backend/*.log
+
+# unplugin 自动生成的类型声明，dev 会话按访问页面覆盖式重写
+src/frontend/auto-imports.d.ts
+src/frontend/components.d.ts
