@@ -1,5 +1,6 @@
 from loguru import logger
 from typing import Optional
+from agentchat.schemas.rerank import RerankResultModel
 from agentchat.services.rag.retrieval import MixRetrival
 from agentchat.services.rewrite.query_write import query_rewriter
 from agentchat.services.rag.es_client import client as es_client
@@ -8,6 +9,16 @@ from agentchat.services.rag.rerank import Reranker
 from agentchat.settings import app_settings
 
 class RagHandler:
+
+    @classmethod
+    async def rerank_documents(cls, query, documents):
+        """按配置决定是否调用重排序服务。未启用时保持混合检索的召回顺序。"""
+        if not documents:
+            return []
+        if app_settings.rag.enable_rerank:
+            return await Reranker.rerank_documents(query, documents)
+        return [RerankResultModel(query=query, content=content, score=1.0, index=index)
+                for index, content in enumerate(documents)]
 
     @classmethod
     async def query_rewrite(cls, query):
@@ -72,7 +83,7 @@ class RagHandler:
         documents_to_rerank = [doc.content for doc in retrieved_documents]
 
         # 文档重排序
-        reranked_docs = await Reranker.rerank_documents(query, documents_to_rerank)
+        reranked_docs = await cls.rerank_documents(query, documents_to_rerank)
 
         # 过滤结果
         filtered_results = []
@@ -125,7 +136,7 @@ class RagHandler:
         documents_to_rerank = [doc.content for doc in retrieved_documents]
 
         # 文档重排序
-        reranked_docs = await Reranker.rerank_documents(query, documents_to_rerank)
+        reranked_docs = await cls.rerank_documents(query, documents_to_rerank)
 
         # 过滤结果
         filtered_results = []
