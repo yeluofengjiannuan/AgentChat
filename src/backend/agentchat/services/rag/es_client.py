@@ -42,7 +42,8 @@ class ESClient:
         await self.insert_documents(index_name, chunks)
 
     async def search_documents(self, query, index_name):
-        index_search = json.loads(ESIndex.index_search_content.format(query=query))
+        # 模板里用 %s 占位，不能走 str.format（JSON 的花括号会被当成字段）。
+        index_search = json.loads(ESIndex.index_search_content % query)
 
         documents = []
         try:
@@ -50,7 +51,7 @@ class ESClient:
             hits = response['hits']
             if not hits.get("max_score"):
                 return documents
-            for hit in hist.get("hits", []):
+            for hit in hits.get("hits", []):
                 documents.append(
                     SearchModel(
                         score=hit['_score'], chunk_id=hit['_source']['chunk_id'],
@@ -68,7 +69,7 @@ class ESClient:
             return documents
 
     async def search_documents_summary(self, query, index_name):
-        index_search = json.loads(ESIndex.index_search_summary.format(query=query))
+        index_search = json.loads(ESIndex.index_search_summary % query)
 
         documents = []
         try:
@@ -95,7 +96,7 @@ class ESClient:
     async def delete_documents(self, file_id, index_name):
         try:
             # 构造查询条件
-            delete_query = json.loads(ESIndex.index_delete.format(file_id=file_id))
+            delete_query = json.loads(ESIndex.index_delete % file_id)
             self.client.delete_by_query(index=index_name, body=delete_query)
             logger.info(f'Success delete documents in file id: {file_id}')
         except Exception as e:
