@@ -40,6 +40,8 @@ class Rag(BaseModel):
     enable_elasticsearch: bool = Field(default=False)
     enable_summary: bool = Field(default=False)
     enable_ik_analyzer: bool = Field(default=False)
+    # 是否调用外部重排序模型；为 False 时直接使用混合检索的召回顺序
+    enable_rerank: bool = Field(default=True)
     retrival: dict = Field(default_factory=dict)
     split: dict = Field(default_factory=dict)
     elasticsearch: dict = Field(default_factory=dict)
