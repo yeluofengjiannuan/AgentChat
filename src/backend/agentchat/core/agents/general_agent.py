@@ -427,6 +427,10 @@ class GeneralAgent:
                 if token == "custom":
                     yield self.wrap_event(metadata)
                 elif isinstance(metadata[0], AIMessageChunk) and metadata[0].content:
+                    # stream_mode="messages" 会把工具内部（如知识库查询重写）的模型输出也吐出来，
+                    # 只保留 agent 自己的 model 节点，否则重排/重写结果会混进回答正文。
+                    if metadata[1].get("langgraph_node") not in (None, "model"):
+                        continue
                     response_content += metadata[0].content
                     yield {
                         "type": "response_chunk",
