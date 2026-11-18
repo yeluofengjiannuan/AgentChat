@@ -7,7 +7,6 @@ import aiofiles
 import yaml
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import SQLModel
 
 from agentchat.database import SystemUser, engine, ensure_database
 from agentchat.database.dao.agent import AgentDao
@@ -39,11 +38,23 @@ async def init_agentchat_system():
     logger.success("系统默认数据已就绪")
 
 
+def run_migrations() -> None:
+    """用 Alembic 把数据库结构升级到最新版本（替代 create_all 直接建表）。"""
+    from alembic import command
+    from alembic.config import Config
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    config.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, "head")
+
+
 async def init_database():
-    """根据模型定义创建数据库及表，不执行旧库结构迁移。"""
+    """创建数据库并执行迁移，不再用 create_all 直接建表。"""
     ensure_database()
-    SQLModel.metadata.create_all(engine)
-    logger.info("数据库表已就绪：{}", engine.dialect.name)
+    run_migrations()
+    logger.info("数据库结构已升级到最新版本：{}", engine.dialect.name)
 
 
 async def load_json(filename: str):
