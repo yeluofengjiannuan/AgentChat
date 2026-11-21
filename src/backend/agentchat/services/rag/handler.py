@@ -1,6 +1,7 @@
 from loguru import logger
 from typing import Optional
 from agentchat.schemas.rerank import RerankResultModel
+from agentchat.services.rag.config_flags import should_query_rewrite
 from agentchat.services.rag.retrieval import MixRetrival
 from agentchat.services.rewrite.query_write import query_rewriter
 from agentchat.services.rag.es_client import client as es_client
@@ -64,14 +65,14 @@ class RagHandler:
 
     @classmethod
     async def rag_query_summary(cls, query, knowledges_id, min_score: Optional[float]=None,
-                                top_k: Optional[int]=None, needs_query_rewrite: bool=True):
+                                top_k: Optional[int]=None, needs_query_rewrite: Optional[bool]=None):
         if min_score is None:
             min_score = app_settings.rag.retrival.get('min_score')
         if top_k is None:
             top_k = app_settings.rag.retrival.get('top_k')
 
         # 查询重写
-        if needs_query_rewrite:
+        if should_query_rewrite(needs_query_rewrite):
             rewritten_queries = await cls.query_rewrite(query)
         else:
             rewritten_queries = [query]
@@ -98,12 +99,14 @@ class RagHandler:
             return final_result
         else:
             logger.info(f"Recall for summary Field numbers < top k, Start recall use content Field")
-            return await cls.retrieve_ranked_documents(query, knowledges_id, knowledges_id)
+            # 兜底也要保留调用方的重写选择，否则会悄悄变回配置默认值
+            return await cls.retrieve_ranked_documents(query, knowledges_id, knowledges_id,
+                                                       needs_query_rewrite=needs_query_rewrite)
 
 
     @classmethod
     async def retrieve_ranked_documents(cls, query, collection_names, index_names=None, min_score: Optional[float]=None,
-                        top_k: Optional[int]=None, needs_query_rewrite: bool=True):
+                        top_k: Optional[int]=None, needs_query_rewrite: Optional[bool]=None):
         """
         处理 RAG 流程：查询重写、文档检索、重排序、结果过滤和拼接。
 
@@ -113,7 +116,7 @@ class RagHandler:
             index_names (list[str]): ES关键词库 集合ID。
             min_score (float): 文档最低分数阈值，默认为配置中的值。
             top_k (int): 召回文档的个数。
-            needs_query_rewrite (bool): 是否需要开启Query重写，默认开启
+            needs_query_rewrite (bool): 是否开启 Query 重写；不传则读 rag.enable_query_rewrite（默认开启）
 
         Returns:
             str: 拼接后的最终结果。
@@ -124,7 +127,7 @@ class RagHandler:
             top_k = app_settings.rag.retrival.get('top_k')
 
         # 查询重写
-        if needs_query_rewrite:
+        if should_query_rewrite(needs_query_rewrite):
             rewritten_queries = await cls.query_rewrite(query)
         else:
             rewritten_queries = [query]
