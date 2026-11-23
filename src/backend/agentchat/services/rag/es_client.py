@@ -1,4 +1,5 @@
 import json
+import time
 from typing import List
 
 from elasticsearch import Elasticsearch
@@ -9,10 +10,65 @@ from agentchat.schemas.chunk import ChunkModel
 from agentchat.schemas.search import SearchModel
 from agentchat.settings import app_settings
 
+# ES 熔断状态：ES 不可达时快速失败，避免每条检索都等满超时（默认 1s）
+_unavailable_until = 0.0
+_consecutive_failures = 0
+
+
+def _config_value(name, default, cast):
+    value = getattr(app_settings.rag, name, None)
+    try:
+        value = cast(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _es_timeout() -> float:
+    return _config_value("es_timeout", 1.0, float)
+
+
+def _cooldown() -> float:
+    return _config_value("es_cooldown", 30.0, float)
+
+
+def _failure_threshold() -> int:
+    return _config_value("es_failure_threshold", 3, int)
+
+
+def breaker_open() -> bool:
+    return time.monotonic() < _unavailable_until
+
+
+def _note_success() -> None:
+    global _consecutive_failures
+    _consecutive_failures = 0
+
+
+def _note_failure(reason: str) -> None:
+    global _consecutive_failures, _unavailable_until
+    _consecutive_failures += 1
+    threshold = _failure_threshold()
+    if _consecutive_failures < threshold:
+        logger.warning(f"ES 检索失败（{reason}，连续 {_consecutive_failures}/{threshold}）")
+        return
+    cooldown = _cooldown()
+    _unavailable_until = time.monotonic() + cooldown
+    logger.warning(f"ES 连续失败 {_consecutive_failures} 次（{reason}），"
+                   f"{cooldown:.0f}s 内只用向量检索")
+
+
+def reset_breaker() -> None:
+    """测试或手动恢复时清空熔断状态。"""
+    global _unavailable_until, _consecutive_failures
+    _unavailable_until = 0.0
+    _consecutive_failures = 0
+
 
 class ESClient:
     def __init__(self):
-        self.client = Elasticsearch(hosts=app_settings.rag.elasticsearch.get('hosts'))
+        hosts = getattr(app_settings.rag, "elasticsearch", {}) or {}
+        self.client = Elasticsearch(hosts=hosts.get('hosts'))
 
     async def insert_documents(self, index_name, chunks: List[ChunkModel]):
         # 构造查询条件
@@ -42,12 +98,19 @@ class ESClient:
         await self.insert_documents(index_name, chunks)
 
     async def search_documents(self, query, index_name):
+        if breaker_open():
+            logger.warning("ES 处于熔断期，跳过关键词检索（本次只用向量检索）")
+            return []
+
         # 模板里用 %s 占位，不能走 str.format（JSON 的花括号会被当成字段）。
         index_search = json.loads(ESIndex.index_search_content % query)
 
         documents = []
         try:
-            response = self.client.search(index=index_name, body=index_search)
+            response = self.client.options(request_timeout=_es_timeout()).search(
+                index=index_name, body=index_search
+            )
+            _note_success()
             hits = response['hits']
             if not hits.get("max_score"):
                 return documents
@@ -63,17 +126,25 @@ class ESClient:
                     )
                 )
         except Exception as e:
+            _note_failure(type(e).__name__)
             logger.error(f'Search documents error: {e}')
         finally:
             await self.close()
             return documents
 
     async def search_documents_summary(self, query, index_name):
+        if breaker_open():
+            logger.warning("ES 处于熔断期，跳过摘要关键词检索（本次只用向量检索）")
+            return []
+
         index_search = json.loads(ESIndex.index_search_summary % query)
 
         documents = []
         try:
-            response = self.client.search(index=index_name, body=index_search)
+            response = self.client.options(request_timeout=_es_timeout()).search(
+                index=index_name, body=index_search
+            )
+            _note_success()
 
             for hit in response['hits'].get("hits", []):
                 documents.append(
@@ -88,6 +159,7 @@ class ESClient:
                 )
 
         except Exception as e:
+            _note_failure(type(e).__name__)
             logger.error(f'Search documents summary error: {e}')
         finally:
             await self.close()
@@ -114,8 +186,8 @@ class ESClient:
         pass
 
 
-# 未启用全文检索时不创建外部客户端。
-client = ESClient() if app_settings.rag.enable_elasticsearch else None
+# 未启用全文检索（或没有 rag 配置段）时不创建外部客户端。
+client = ESClient() if getattr(app_settings.rag, "enable_elasticsearch", False) else None
 
 # ⭐Elasticsearch 在7.11版本之前不支持异步，因本地部署的7.0.0版本，所以使用的同步，如果ES版本较高，建议使用下面的异步代码⭐
 # import json
