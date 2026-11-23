@@ -52,6 +52,10 @@ class Rag(BaseModel):
     embedding_cooldown: float = Field(default=30.0)
     # 连续失败多少次才熔断；单次抖动不应把整条检索降级
     embedding_failure_threshold: int = Field(default=3)
+    # ES 检索超时（秒）；超时/失败后熔断，检索降级为纯向量
+    es_timeout: float = Field(default=1.0)
+    es_cooldown: float = Field(default=30.0)
+    es_failure_threshold: int = Field(default=3)
     retrival: dict = Field(default_factory=dict)
     split: dict = Field(default_factory=dict)
     elasticsearch: dict = Field(default_factory=dict)
