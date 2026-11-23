@@ -42,12 +42,16 @@ class Rag(BaseModel):
     enable_ik_analyzer: bool = Field(default=False)
     # 是否调用外部重排序模型；为 False 时直接使用混合检索的召回顺序
     enable_rerank: bool = Field(default=True)
+    # 是否用 LLM 把用户问题改写成多条同义问法（会多出一次 LLM 调用和多次检索）
+    enable_query_rewrite: bool = Field(default=True)
     # 重排序总超时（秒）；超时或失败时降级为混合检索顺序，避免拖慢整条检索
     rerank_timeout: float = Field(default=1.5)
     # 向量化单次调用预算（秒）；超时后熔断一段时间，检索直接降级为 ES 结果
     embedding_timeout: float = Field(default=1.2)
     # 熔断时长（秒）：持有期内 embedding 调用快速失败，不再等待超时
     embedding_cooldown: float = Field(default=30.0)
+    # 连续失败多少次才熔断；单次抖动不应把整条检索降级
+    embedding_failure_threshold: int = Field(default=3)
     retrival: dict = Field(default_factory=dict)
     split: dict = Field(default_factory=dict)
     elasticsearch: dict = Field(default_factory=dict)

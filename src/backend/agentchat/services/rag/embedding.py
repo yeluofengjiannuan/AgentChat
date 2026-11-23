@@ -16,12 +16,23 @@ from agentchat.settings import app_settings
 
 # 熔断到期时间戳（monotonic）；0 表示未熔断
 _unavailable_until = 0.0
+# 连续失败次数：单次抖动不应熔断，连续失败达到阈值才熔断
+_consecutive_failures = 0
 
 
 def _config_float(name: str, default: float) -> float:
     value = getattr(app_settings.rag, name, None)
     try:
         value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _config_int(name: str, default: int) -> int:
+    value = getattr(app_settings.rag, name, None)
+    try:
+        value = int(value)
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
@@ -35,21 +46,37 @@ def _cooldown() -> float:
     return _config_float("embedding_cooldown", 30.0)
 
 
+def _failure_threshold() -> int:
+    return _config_int("embedding_failure_threshold", 3)
+
+
 def _breaker_open() -> bool:
     return time.monotonic() < _unavailable_until
 
 
-def _open_breaker(reason: str) -> None:
-    global _unavailable_until
+def _note_success() -> None:
+    global _consecutive_failures
+    _consecutive_failures = 0
+
+
+def _note_failure(reason: str) -> None:
+    global _consecutive_failures, _unavailable_until
+    _consecutive_failures += 1
+    threshold = _failure_threshold()
+    if _consecutive_failures < threshold:
+        logger.warning(f"embedding 调用失败（{reason}，连续 {_consecutive_failures}/{threshold}）")
+        return
     cooldown = _cooldown()
     _unavailable_until = time.monotonic() + cooldown
-    logger.warning(f"embedding 不可用（{reason}），{cooldown:.0f}s 内检索降级为 ES 结果")
+    logger.warning(f"embedding 连续失败 {_consecutive_failures} 次（{reason}），"
+                   f"{cooldown:.0f}s 内检索降级为 ES 结果")
 
 
 def reset_breaker() -> None:
     """测试或手动恢复时清空熔断状态。"""
-    global _unavailable_until
+    global _unavailable_until, _consecutive_failures
     _unavailable_until = 0.0
+    _consecutive_failures = 0
 
 
 async def _create_embeddings(embedding_client, inputs):
@@ -64,7 +91,7 @@ async def _create_embeddings(embedding_client, inputs):
         if remaining <= 0:
             break
         try:
-            return await asyncio.wait_for(
+            response = await asyncio.wait_for(
                 embedding_client.embeddings.create(
                     model=app_settings.multi_models.embedding.model_name,
                     input=inputs,
@@ -72,6 +99,8 @@ async def _create_embeddings(embedding_client, inputs):
                 ),
                 timeout=remaining,
             )
+            _note_success()
+            return response
         except asyncio.TimeoutError as err:
             # 预算已被这次超时用完，重试没有意义
             last_error = err
@@ -82,7 +111,7 @@ async def _create_embeddings(embedding_client, inputs):
             if deadline - time.monotonic() <= 0.05:
                 break
 
-    _open_breaker(type(last_error).__name__ if last_error else "unknown")
+    _note_failure(type(last_error).__name__ if last_error else "unknown")
     raise last_error if last_error else RuntimeError("embedding 调用失败")
 
 
