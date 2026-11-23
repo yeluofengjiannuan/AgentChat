@@ -50,6 +50,8 @@ class Rag(BaseModel):
     embedding_timeout: float = Field(default=1.2)
     # 熔断时长（秒）：持有期内 embedding 调用快速失败，不再等待超时
     embedding_cooldown: float = Field(default=30.0)
+    # 连续失败多少次才熔断；单次抖动不应把整条检索降级
+    embedding_failure_threshold: int = Field(default=3)
     retrival: dict = Field(default_factory=dict)
     split: dict = Field(default_factory=dict)
     elasticsearch: dict = Field(default_factory=dict)
