@@ -126,16 +126,18 @@ class MilvusClient:
             logger.error(f"Failed to create collection '{collection_name}': {e}")
             raise
 
-    async def search(self, query: str, collection_name: str, top_k: int = 10) -> List[SearchModel]:
-        """在指定集合中搜索相似数据"""
+    async def search(self, query: str, collection_name: str, top_k: int = 10,
+                     query_embedding: Optional[List[float]] = None) -> List[SearchModel]:
+        """在指定集合中搜索相似数据，可复用批量向量化的查询向量。"""
         collection = self._get_collection_safe(collection_name)
         if not collection:
             logger.error(f"Cannot search in collection '{collection_name}' - collection not available")
             return []
 
         try:
-            # 生成查询向量
-            query_embedding = await get_embedding(query)
+            # 生成查询向量（批量向量化时由调用方传入）
+            if query_embedding is None:
+                query_embedding = await get_embedding(query)
 
             # 定义搜索参数
             search_params = {
@@ -174,7 +176,8 @@ class MilvusClient:
             logger.error(f"Search failed in collection '{collection_name}': {e}")
             return []
 
-    async def search_summary(self, query: str, collection_name: str, top_k: int = 10) -> List[SearchModel]:
+    async def search_summary(self, query: str, collection_name: str, top_k: int = 10,
+                             query_embedding: Optional[List[float]] = None) -> List[SearchModel]:
         """在指定集合中搜索相似数据（基于摘要）"""
         collection = self._get_collection_safe(collection_name)
         if not collection:
@@ -182,8 +185,9 @@ class MilvusClient:
             return []
 
         try:
-            # 生成查询向量
-            query_embedding = await get_embedding(query)
+            # 生成查询向量（批量向量化时由调用方传入）
+            if query_embedding is None:
+                query_embedding = await get_embedding(query)
 
             # 定义搜索参数
             search_params = {

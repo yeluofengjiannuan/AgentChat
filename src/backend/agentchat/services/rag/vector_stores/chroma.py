@@ -78,8 +78,12 @@ class ChromaClient:
             logger.error(f"Failed to create collection '{collection_name}': {e}")
             raise
 
-    async def search(self, query: str, collection_name: str, top_k: int = 10) -> List[SearchModel]:
-        """在指定集合中搜索相似数据"""
+    async def search(self, query: str, collection_name: str, top_k: int = 10,
+                     query_embedding: Optional[List[float]] = None) -> List[SearchModel]:
+        """在指定集合中搜索相似数据。
+
+        query_embedding 传入时直接复用（批量向量化的查询），不再单独调用 embedding。
+        """
         collection = self._get_collection_safe(collection_name)
         if not collection:
             logger.error(f"Cannot search in collection '{collection_name}' - collection not available")
@@ -87,12 +91,12 @@ class ChromaClient:
 
         try:
             # 获取查询向量
-            query_embeddings = await get_embedding([query])  # 确保传入列表
-            if not query_embeddings or len(query_embeddings) == 0:
-                logger.error("Failed to generate query embedding")
-                return []
-
-            query_embedding = query_embeddings[0]
+            if query_embedding is None:
+                query_embeddings = await get_embedding([query])  # 确保传入列表
+                if not query_embeddings or len(query_embeddings) == 0:
+                    logger.error("Failed to generate query embedding")
+                    return []
+                query_embedding = query_embeddings[0]
 
             results = collection.query(
                 query_embeddings=[query_embedding],
@@ -128,7 +132,8 @@ class ChromaClient:
             logger.error(f"Search failed in collection '{collection_name}': {e}")
             return []
 
-    async def search_summary(self, query: str, collection_name: str, top_k: int = 10) -> List[SearchModel]:
+    async def search_summary(self, query: str, collection_name: str, top_k: int = 10,
+                             query_embedding: Optional[List[float]] = None) -> List[SearchModel]:
         """在指定集合中搜索相似数据（基于摘要）"""
         collection = self._get_collection_safe(collection_name)
         if not collection:
@@ -136,12 +141,13 @@ class ChromaClient:
             return []
 
         try:
-            query_embeddings = await get_embedding([query])
-            if not query_embeddings or len(query_embeddings) == 0:
-                logger.error("Failed to generate query embedding")
-                return []
+            if query_embedding is None:
+                query_embeddings = await get_embedding([query])
+                if not query_embeddings or len(query_embeddings) == 0:
+                    logger.error("Failed to generate query embedding")
+                    return []
 
-            query_embedding = query_embeddings[0]
+                query_embedding = query_embeddings[0]
 
             results = collection.query(
                 query_embeddings=[query_embedding],
